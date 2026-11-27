@@ -2,7 +2,9 @@
 //
 // The host describes a home screen and a menu; this firmware only draws them
 // and reports turns, clicks and chosen values. Home screen: turning and
-// clicking are passed to the host. A long press or a tap on the screen opens
+// clicking are passed to the host; with layout "call" the host's call sign,
+// name and talkgroup fields are shown instead of the big value. A long press
+// or a tap on the screen opens
 // the menu; host items come first, then the dial's own settings. Every other
 // screen falls back to the home screen after a few seconds idle.
 #include <Arduino.h>
@@ -70,6 +72,8 @@ static String pendingVal;           // list value sent, until the host confirms
 static uint32_t pendingAt = 0;
 static int brightness = 140;
 static bool soundOn = true;
+static String lastCall, lastName;   // call layout: last call/name from the host, kept while idle
+static String lastTg;               // talkgroup lastCall belongs to; a change clears it
 static int turnAcc = 0;
 static uint32_t turnSentAt = 0;
 static uint32_t lastInput = 0;
@@ -146,6 +150,95 @@ static void bigValue(const String &s, int y, uint16_t col, int maxW) {
     const lgfx::IFont *f = asciiOnly(s) ? fit(s, maxW, {FONT_HUGE, FONT_NUM, FONT_NUMS, FONT_NUMXS})
                                         : fit(s, maxW, {FONT_BIG, FONT_TEXT});
     centered(s, y, f, col, maxW);
+}
+
+/// a + b as one centred line, each in its own font and colour, 8 px apart.
+static int pairWidth(const String &a, const lgfx::IFont *fa, const String &b, const lgfx::IFont *fb, int maxW) {
+    int w = 0;
+    if (a.length()) { canvas.setFont(fa); w = min((int)canvas.textWidth(a), maxW); }
+    if (b.length()) { canvas.setFont(fb); w += (w ? 8 : 0) + canvas.textWidth(b); }
+    return min(w, maxW);
+}
+
+static void pairText(int y, const String &a, const lgfx::IFont *fa, uint16_t ca,
+                     const String &b, const lgfx::IFont *fb, uint16_t cb, int maxW) {
+    canvas.setFont(fa);
+    int w1 = a.length() ? min((int)canvas.textWidth(a), maxW) : 0;
+    int gap = w1 && b.length() ? 8 : 0;
+    int x = CX - pairWidth(a, fa, b, fb, maxW) / 2;
+    if (a.length()) text(a, x, y, fa, ca, maxW, middle_left);
+    if (b.length()) text(b, x + w1 + gap, y, fb, cb, max(10, maxW - w1 - gap), middle_left);
+}
+
+/// Call sign as large as fits. An SSID after the last "-" (DL1ABC-7) is drawn
+/// small after the call when that still fits; otherwise the call alone is
+/// drawn and the suffix is returned for the caller to show elsewhere.
+static String drawCall(const String &s, int y, uint16_t col, int maxW) {
+    int dash = s.lastIndexOf('-');
+    String call = s, suffix;
+    if (dash > 0 && dash < (int)s.length() - 1) { call = s.substring(0, dash); suffix = s.substring(dash); }
+    const lgfx::IFont *f = asciiOnly(call) ? fit(call, maxW, {FONT_HUGE, FONT_NUM, FONT_NUMS, FONT_NUMXS})
+                                           : fit(call, maxW, {FONT_BIG, FONT_TEXT});
+    canvas.setFont(f);
+    int w1 = min((int)canvas.textWidth(call), maxW);
+    int bottom = y + canvas.fontHeight() / 2;
+    canvas.setFont(FONT_NUMXS);
+    int w2 = suffix.length() ? canvas.textWidth(suffix) + 4 : 0;
+    if (!w2 || w1 + w2 > maxW) { centered(call, y, f, col, maxW); return suffix; }
+    int x = CX - (w1 + w2) / 2;
+    text(call, x, y, f, col, maxW, middle_left);
+    text(suffix, x + w1 + 4, bottom, FONT_NUMXS, C_DIM, w2, bottom_left);   // baselines aligned
+    return "";
+}
+
+/// Marquee: text that fits is drawn centred and static. Longer text scrolls
+/// through a window (pause, run, pause, jump back); only that strip is then
+/// redrawn and pushed to the display, see marqueeTick().
+struct Marquee {
+    bool active = false;            // text too long: keep the strip moving
+    String key;
+    const lgfx::IFont *font = nullptr;
+    uint16_t col = 0;
+    int x = 0, y = 0, w = 0, h = 0; // window
+    int textW = 0;
+    uint32_t t0 = 0, at = 0;
+};
+static Marquee mq;
+
+static void marqueeDraw() {
+    const uint32_t PAUSE = 1500, SPEED = 30;      // ms, px/s
+    uint32_t run = (uint32_t)(mq.textW - mq.w) * 1000 / SPEED;
+    uint32_t t = (millis() - mq.t0) % (PAUSE + run + PAUSE);
+    int off = t < PAUSE ? 0 : t < PAUSE + run ? (int)((t - PAUSE) * SPEED / 1000) : mq.textW - mq.w;
+    canvas.fillRect(mq.x, mq.y, mq.w, mq.h, C_BG);
+    canvas.setClipRect(mq.x, mq.y, mq.w, mq.h);
+    canvas.setFont(mq.font);
+    canvas.setTextColor(mq.col);
+    canvas.setTextDatum(middle_left);
+    canvas.drawString(mq.key, mq.x - off, mq.y + mq.h / 2);
+    canvas.clearClipRect();
+}
+
+static void marquee(const String &s, int y, const lgfx::IFont *f, uint16_t col, int maxW) {
+    canvas.setFont(f);
+    int w = canvas.textWidth(s);
+    if (w <= maxW) { centered(s, y, f, col, maxW); return; }
+    if (s != mq.key) { mq.key = s; mq.t0 = millis(); }
+    mq.active = true;
+    mq.font = f; mq.col = col; mq.textW = w;
+    mq.h = canvas.fontHeight(); mq.w = maxW; mq.x = CX - maxW / 2; mq.y = y - mq.h / 2;
+    marqueeDraw();
+}
+
+/// Redraw and push only the marquee strip while it is moving.
+static void marqueeTick(uint32_t now) {
+    if (!mq.active || now - mq.at < 40) return;
+    mq.at = now;
+    marqueeDraw();
+    auto &d = board::display();
+    d.setClipRect(mq.x, mq.y, mq.w, mq.h);
+    canvas.pushSprite(0, 0);
+    d.clearClipRect();
 }
 
 /// Segmented 270° gauge (gap at the bottom).
@@ -330,10 +423,10 @@ static void drawHeader() {
     }
 }
 
-static void drawHome() {
+/// Default layout: big value in the centre, label under it, pill at the bottom.
+static void drawHomeValue() {
     const Home &h = dlink::home;
     uint16_t ac = named(h.accent);
-    if (h.hasGauge) gauge(h.gauge, h.gaugeMax, h.muted ? C_ORANGE : ac, 108, 96);
     drawHeader();
     if (h.muted) {
         iconSpeaker(CX - 2, CY - 6, C_ORANGE, true);
@@ -354,6 +447,39 @@ static void drawHome() {
         text(h.pill, x, y + 1, FONT_TEXT, ac, 130, middle_left);
         if (h.pill2.length()) text(h.pill2, x + w1 + 8, y + 1, FONT_SMALL, C_FG, max(10, 130 - w1 - 8), middle_left);
     }
+}
+
+/// Call layout (host sends layout "call"), top to bottom: tg, the last call
+/// sign large (green while receiving, red while sending), name, tgname, and
+/// big with its label in the panel at the bottom. No top line: tg sits there.
+static void drawHomeCall() {
+    const Home &h = dlink::home;
+    uint16_t ac = named(h.accent);
+    if (h.tg.length())
+        centered(h.tg, CY - 66, asciiOnly(h.tg) ? fit(h.tg, 112, {FONT_NUMS, FONT_NUMXS}) : FONT_TEXT, ac, 112);
+    bool live = h.call.length() && (h.ring == "rx" || h.ring == "tx");
+    uint16_t c = !live ? C_FG : h.ring == "tx" ? C_RED : C_GREEN;
+    String suffix = drawCall(lastCall, CY - 14, c, h.hasGauge ? 180 : 200);
+    if (suffix.length() || lastName.length())
+        pairText(CY + 18, suffix, FONT_NUMXS, C_DIM, lastName, FONT_TEXT, C_FG, 180);
+    if (h.tgname.length()) marquee(h.tgname, CY + 36, FONT_TEXT, ac, 166);
+    int py = CY + 59, ph = 28;                     // panel: text width w, 12 px padding
+    auto panel = [&](int w) { canvas.fillSmoothRoundRect(CX - w / 2 - 12, py - ph / 2, w + 24, ph, ph / 2, C_PANEL); };
+    if (h.muted) {
+        canvas.setFont(FONT_TEXT);
+        panel(canvas.textWidth("STUMM") + 4);
+        centered("STUMM", py + 1, FONT_TEXT, C_ORANGE);
+    } else if (h.big.length() || h.label.length()) {
+        panel(pairWidth(h.label, FONT_SMALL, h.big, FONT_TEXT, 110));
+        pairText(py + 1, h.label, FONT_SMALL, C_DIM, h.big, FONT_TEXT, C_FG, 110);
+    }
+}
+
+static void drawHome() {
+    const Home &h = dlink::home;
+    if (h.hasGauge) gauge(h.gauge, h.gaugeMax, h.muted ? C_ORANGE : named(h.accent), 108, 96);
+    if (h.layout == "call" && lastCall.length()) drawHomeCall();
+    else drawHomeValue();
 }
 
 /// State of an entry as a short pill under its label in the menu.
@@ -459,6 +585,7 @@ static void drawOffline() {
 }
 
 static void render() {
+    mq.active = false;                  // set again by drawHomeCall when tgname is too long
     canvas.fillScreen(C_BG);
     drawRing();
     if (!dlink::linked) drawOffline();
@@ -652,6 +779,8 @@ static void tick() {
     }
     if (dlink::version != seenVersion) {
         seenVersion = dlink::version;
+        if (dlink::home.tg != lastTg) { lastTg = dlink::home.tg; lastCall = ""; lastName = ""; }  // new talkgroup
+        if (dlink::home.call.length()) { lastCall = dlink::home.call; lastName = dlink::home.name; }
         if (mode == Mode::Menu) buildEntries();
         if ((mode == Mode::List || mode == Mode::Range) && !openItem()) setMode(Mode::Home);
         if (mode == Mode::Range && !rangeDirty && now - lastInput > 1000) {
@@ -660,6 +789,7 @@ static void tick() {
         }
         dirty = true;
     }
+    if (mode == Mode::Home && dlink::linked) marqueeTick(now);
     static uint32_t animAt = 0;                    // offline animation
     if (!dlink::linked && now - animAt > 120) { animAt = now; dirty = true; }
 }

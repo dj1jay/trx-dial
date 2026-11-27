@@ -23,6 +23,9 @@ or needs a confirmation.
   Lists (talkgroups, bands, modes) open as a scrolling list, values as a gauge,
   switches toggle in place.
 - The dial adds its own entries after the host's: brightness, confirmation beeps, back.
+- A host can ask for the **call layout** (`layout: "call"` in `home`): the talker's
+  call sign large in the centre, the talkgroup number and name and the talker's name
+  around it, the value (volume) in the box at the bottom.
 - Every screen falls back to the home screen after 8 s without input.
 - Outer ring: blue = connected, green = receiving, red = transmitting, grey = not connected.
 
@@ -31,7 +34,7 @@ or needs a confirmation.
 | Path | Content |
 |---|---|
 | `firmware/` | PlatformIO project for the M5Stack Dial (Arduino, M5Unified, NimBLE, ArduinoJson) |
-| `docs/protocol.md` | The protocol (v2): GATT service, messages in both directions |
+| `docs/protocol.md` | The protocol (v2): GATT service, messages in both directions, home-screen layouts |
 | `tools/shot.py` | Grab the dial's screen over USB and simulate knob input, for development |
 
 The afu-remote side lives in the afu.tools repository (`site/js/remote-dial.js`).

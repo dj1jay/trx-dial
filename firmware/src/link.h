@@ -28,6 +28,7 @@ struct MenuItem {
 
 struct Home {
     String top, big, label, pill, pill2, banner;
+    String layout, call, name, tg, tgname;      // optional: "call" layout and its parts
     String accent = "green";
     String ring = "off";
     bool hasGauge = false;

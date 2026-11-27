@@ -85,5 +85,23 @@ Only changed keys need to be sent.
 | `ring` | outer ring: `off` (not connected), `idle`, `rx`, `tx` |
 | `banner` | text in a coloured box at the top while `ring` is `rx` or `tx` (talker call, "SENDEN") |
 | `muted` | 1: show the mute symbol instead of `big` |
+| `layout` | optional: `call` switches the home screen to the call layout below; missing or any other value gives the default layout |
+| `call`, `name`, `tg`, `tgname` | optional, call layout only: the talker's call sign and name, the talkgroup number and name |
 
 Only changed keys need to be sent; missing keys keep their last value.
+
+#### Call layout
+
+For hosts where the talker matters more than the value (FM-Funknetz):
+
+```json
+{"t":"home","layout":"call","call":"DL1ABC-7","name":"Hans","tg":"262","tgname":"Deutschland",
+ "big":"7","label":"Lautstärke","gauge":[7,15],"accent":"yellow","ring":"rx"}
+```
+
+Top to bottom: `tg`, `call` large (green while `ring` is `rx`, red while `tx`; an
+SSID after the last `-` is drawn small after the call), `name`, `tgname` (scrolls
+when too long), and `big` with `label` in the box at the bottom. `top`, `banner`,
+`pill` and `pill2` are not shown in this layout. The dial keeps the last `call` and
+`name` on screen while `call` is empty (nobody talking) and forgets them when `tg`
+changes. Until the first `call` on a talkgroup the default layout is shown.

@@ -132,6 +132,11 @@ static void parseHome(JsonObjectConst o) {
     take("pill", home.pill);
     take("pill2", home.pill2);
     take("banner", home.banner);
+    take("layout", home.layout);
+    take("call", home.call);
+    take("name", home.name);
+    take("tg", home.tg);
+    take("tgname", home.tgname);
     take("accent", home.accent);
     take("ring", home.ring);
     if (!o["muted"].isNull()) home.muted = (o["muted"] | 0) != 0;
