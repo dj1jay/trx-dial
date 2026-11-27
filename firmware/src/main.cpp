@@ -15,6 +15,7 @@
 #define FONT_HUGE  (&fonts::DejaVu56)
 #define FONT_NUM   (&fonts::DejaVu40)
 #define FONT_NUMS  (&fonts::DejaVu24)
+#define FONT_NUMXS (&fonts::DejaVu18)
 #define FONT_BIG   (&fonts::efontJA_24_b)
 #define FONT_TEXT  (&fonts::efontJA_16_b)
 #define FONT_SMALL (&fonts::efontJA_12)
@@ -102,6 +103,11 @@ static void setMode(Mode m) {
 
 // ------------------------------------------------------------- primitives
 
+static bool asciiOnly(const String &s) {
+    for (size_t i = 0; i < s.length(); i++) if ((uint8_t)s[i] >= 0x80) return false;
+    return true;
+}
+
 static void utf8Chop(String &t) {
     int i = t.length() - 1;
     while (i > 0 && (t[i] & 0xC0) == 0x80) i--;
@@ -116,7 +122,7 @@ static void text(const String &s, int x, int y, const lgfx::IFont *f, uint16_t c
     String t = s;
     bool cut = false;
     while (t.length() > 1 && canvas.textWidth(t) > maxW) { utf8Chop(t); cut = true; }
-    if (cut && t.length() > 1) { utf8Chop(t); t += "…"; }
+    if (cut && t.length() > 1) { utf8Chop(t); t += asciiOnly(s) ? "..." : "…"; }  // DejaVu has no "…"
     canvas.drawString(t, x, y);
 }
 
@@ -135,14 +141,9 @@ static const lgfx::IFont *fit(const String &s, int maxW, std::initializer_list<c
     return last;
 }
 
-static bool asciiOnly(const String &s) {
-    for (size_t i = 0; i < s.length(); i++) if ((uint8_t)s[i] >= 0x80) return false;
-    return true;
-}
-
 /// Big centred value: DejaVu for plain ASCII (numbers, frequencies), efont otherwise.
 static void bigValue(const String &s, int y, uint16_t col, int maxW) {
-    const lgfx::IFont *f = asciiOnly(s) ? fit(s, maxW, {FONT_HUGE, FONT_NUM, FONT_NUMS})
+    const lgfx::IFont *f = asciiOnly(s) ? fit(s, maxW, {FONT_HUGE, FONT_NUM, FONT_NUMS, FONT_NUMXS})
                                         : fit(s, maxW, {FONT_BIG, FONT_TEXT});
     centered(s, y, f, col, maxW);
 }
